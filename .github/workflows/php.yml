@@ -1,0 +1,115 @@
+name: PHP
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  composer-install:
+    name: Composer Install
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Get composer cache directory
+        id: composer-cache-dir
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        id: composer-cache
+        uses: actions/cache@v4.2.0
+        with:
+          path: |
+            ${{ steps.composer-cache-dir.outputs.dir }}
+            vendor
+          key: composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: composer-
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@2.32.0
+        with:
+          php-version: "8.4"
+
+      - name: Install dependencies
+        if: steps.composer-cache.outputs.cache-hit != 'true'
+        run: composer install
+
+      - name: Validate composer.json and composer.lock
+        if: steps.composer-cache.outputs.cache-hit != 'true'
+        run: composer validate
+
+  tests:
+    name: PHPUnit tests
+    runs-on: ubuntu-24.04
+    needs: [composer-install]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup PHP
+        uses: ./.github/actions/setup-php
+        with:
+          coverage: pcov
+
+      - name: Run PHPUnit tests
+        run: php -dpcov.enabled=1 -dpcov.directory=. vendor/bin/phpunit --coverage-text --show-uncovered-for-coverage-text
+
+  checkstyle:
+    name: Checkstyle
+    runs-on: ubuntu-24.04
+    needs: [composer-install]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup PHP
+        uses: ./.github/actions/setup-php
+
+      - name: Checkstyle Cache
+        uses: actions/cache@v4.2.0
+        with:
+          path: .phpcs.cache
+          key: phpcs-${{ github.ref_name }}
+          restore-keys: |
+            phpcs-${{ github.ref_name }}
+            phpcs-
+
+      - name: Run composer checkstyle
+        run: composer checkstyle
+
+  checktype:
+    name: Checktype
+    runs-on: ubuntu-24.04
+    needs: [composer-install]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup PHP
+        uses: ./.github/actions/setup-php
+
+      - name: Checktype Cache
+        uses: actions/cache@v4.2.0
+        with:
+          path: .phpstan.cache
+          key: phpstan-${{ github.ref_name }}
+          restore-keys: |
+            phpstan-${{ github.ref_name }}
+            phpstan-
+
+      - name: Run composer checktype
+        run: composer checktype -- -vvv
